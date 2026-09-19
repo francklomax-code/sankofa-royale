@@ -1,0 +1,75 @@
+name: Compiler l'APK Android
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "debug (installable tout de suite) ou release (signé, pour le Play Store)"
+        type: choice
+        options: [debug, release]
+        default: debug
+
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Installer les dépendances
+        run: npm ci || npm install
+
+      - name: Synchroniser les fichiers web dans le projet natif
+        run: npx cap sync android
+
+      - name: Compiler l'APK de test
+        if: github.event.inputs.build_type != 'release'
+        working-directory: android
+        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+
+      - name: Restaurer la clé de signature
+        if: github.event.inputs.build_type == 'release'
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+      - name: Compiler l'APK et l'AAB signés
+        if: github.event.inputs.build_type == 'release'
+        working-directory: android
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: chmod +x gradlew && ./gradlew assembleRelease bundleRelease --no-daemon
+
+      - name: Récapitulatif
+        run: |
+          echo "### Fichiers produits" >> $GITHUB_STEP_SUMMARY
+          find android/app/build/outputs -name "*.apk" -o -name "*.aab" | while read f; do
+            echo "- \`$(basename $f)\` — $(du -h "$f" | cut -f1)" >> $GITHUB_STEP_SUMMARY
+          done
+
+      - name: Publier les fichiers produits
+        uses: actions/upload-artifact@v4
+        with:
+          name: sankofa-royale-${{ github.event.inputs.build_type || 'debug' }}
+          path: |
+            android/app/build/outputs/apk/**/*.apk
+            android/app/build/outputs/bundle/**/*.aab
+          if-no-files-found: error
