@@ -21,28 +21,68 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Vérifier la structure du dépôt
+        run: |
+          echo "--- racine du dépôt ---"
+          ls -la
+          fail=0
+          check() {
+            if [ ! -e "$1" ]; then echo "::error::$1 est introuvable — $2"; fail=1
+            else echo "ok   $1"; fi
+          }
+          check package.json          "avez-vous poussé le CONTENU du dossier sankofa/ et non le dossier lui-même ?"
+          check www/index.html        "le jeu doit se trouver dans www/"
+          check capacitor.config.json "configuration Capacitor absente"
+          check android/build.gradle  "le projet Android natif est absent"
+          check android/gradlew       "script Gradle absent"
+          check android/gradle/wrapper/gradle-wrapper.jar "un .gitignore contenant *.jar l'a probablement exclu du commit"
+          echo "--- versions ---"
+          node -v; npm -v; java -version 2>&1 | head -1
+          exit $fail
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
 
-      - uses: android-actions/setup-android@v3
+      - name: Préparer le SDK Android
+        run: |
+          # Le runner Ubuntu embarque déjà le SDK : pas besoin d'action externe.
+          # (android-actions/setup-android échoue car il réclame le paquet "tools",
+          #  retiré du dépôt Google.)
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "SDK : $SDK"
+          if [ ! -d "$SDK" ]; then echo "::error::SDK Android introuvable sur le runner"; exit 1; fi
+          echo "ANDROID_HOME=$SDK" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$SDK" >> $GITHUB_ENV
+          echo "--- plateformes déjà présentes ---"; ls "$SDK/platforms" 2>/dev/null || echo "(aucune)"
+          echo "--- build-tools déjà présents ---"; ls "$SDK/build-tools" 2>/dev/null || echo "(aucun)"
+          SDKMGR=$(find "$SDK/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -1)
+          if [ -n "$SDKMGR" ]; then
+            yes | "$SDKMGR" --licenses > /dev/null 2>&1 || true
+            "$SDKMGR" "platform-tools" "platforms;android-36" "build-tools;36.0.0" \
+              || echo "Paquets non installés ici — Gradle les téléchargera au besoin."
+          else
+            echo "sdkmanager introuvable : Gradle se débrouillera avec ce qui est installé."
+          fi
 
       - name: Installer les dépendances
-        run: npm ci || npm install
+        run: npm install --no-audit --no-fund
 
       - name: Synchroniser les fichiers web dans le projet natif
         run: npx cap sync android
 
+      - name: Rendre gradlew exécutable
+        run: chmod +x android/gradlew
+
       - name: Compiler l'APK de test
         if: github.event.inputs.build_type != 'release'
         working-directory: android
-        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Restaurer la clé de signature
         if: github.event.inputs.build_type == 'release'
@@ -56,14 +96,19 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: chmod +x gradlew && ./gradlew assembleRelease bundleRelease --no-daemon
+        run: ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace
 
       - name: Récapitulatif
+        if: always()
         run: |
           echo "### Fichiers produits" >> $GITHUB_STEP_SUMMARY
-          find android/app/build/outputs -name "*.apk" -o -name "*.aab" | while read f; do
+          found=0
+          for f in $(find android/app/build/outputs -name "*.apk" -o -name "*.aab" 2>/dev/null); do
             echo "- \`$(basename $f)\` — $(du -h "$f" | cut -f1)" >> $GITHUB_STEP_SUMMARY
+            found=1
           done
+          [ $found -eq 0 ] && echo "Aucun fichier produit : la compilation a échoué plus haut." >> $GITHUB_STEP_SUMMARY
+          exit 0
 
       - name: Publier les fichiers produits
         uses: actions/upload-artifact@v4

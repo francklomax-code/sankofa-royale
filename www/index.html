@@ -375,6 +375,24 @@ button.build[disabled]{background:rgba(255,255,255,.1);color:#8B705C;box-shadow:
 .tile.sel .face{animation:selGlow .85s ease-in-out infinite alternate}
 @keyframes selGlow{to{box-shadow:inset 0 -2px 4px rgba(0,0,0,.28),inset 0 2px 3px rgba(255,255,255,.45),0 0 18px rgba(255,231,166,.95)}}
 
+.code{
+  width:100%;min-height:74px;margin:6px 0 2px;padding:10px;
+  background:rgba(0,0,0,.35);border:1px solid rgba(243,190,73,.3);border-radius:10px;
+  color:var(--creme);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;
+  line-height:1.4;word-break:break-all;resize:none;
+}
+.card .row{display:flex;gap:8px}
+.card .row button{flex:1}
+
+/* ---------- zones système (encoche, barre d'état, barre de navigation) ---------- */
+/* Dans l'APK, Capacitor écarte déjà la WebView des barres : ces valeurs y valent 0.
+   Elles protègent la version web et les appareils où la marge native ne s'applique pas. */
+.crown{padding-top:calc(12px + env(safe-area-inset-top, 0px))}
+#app{padding-bottom:calc(18px + env(safe-area-inset-bottom, 0px));
+     padding-left:calc(12px + env(safe-area-inset-left, 0px));
+     padding-right:calc(12px + env(safe-area-inset-right, 0px))}
+.veil{padding:calc(22px + env(safe-area-inset-top, 0px)) 22px calc(22px + env(safe-area-inset-bottom, 0px))}
+
 .hide{display:none!important}
 @media (prefers-reduced-motion: reduce){
   *{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.06s!important}
@@ -392,6 +410,7 @@ button.build[disabled]{background:rgba(255,255,255,.1);color:#8B705C;box-shadow:
       <div class="coin" id="c-bois"><svg viewBox="0 0 40 40"><rect x="7" y="15" width="26" height="10" rx="5" fill="#A8623A"/><ellipse cx="33" cy="20" rx="4" ry="5" fill="#C98055"/><path d="M33 17v6" stroke="#6B3A1E" stroke-width="1.6"/></svg><span>0</span></div>
     </div>
     <button class="snd" id="sndBtn" type="button" aria-label="Activer ou couper le son"></button>
+    <button class="snd" id="saveBtn" type="button" aria-label="Sauvegarder ou restaurer la progression"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg></button>
   </div>
 
   <!-- ============ LE ROYAUME ============ -->
@@ -1092,11 +1111,11 @@ function tileSVG(t){
 /* ================= DISTRICTS ET CHANTIERS ================= */
 const DISTRICTS=[
  {nm:"La Cour du Baobab",      gate:1,   sky:"dusk",  terrain:"cour"},
- {nm:"Le Marché aux Tissus",   gate:45,  sky:"day",   terrain:"marche"},
- {nm:"La Cité de Banco",       gate:120, sky:"dusk",  terrain:"cite"},
- {nm:"Les Rives du Fleuve",    gate:220, sky:"day",   terrain:"fleuve"},
- {nm:"La Savane Royale",       gate:350, sky:"gold",  terrain:"savane"},
- {nm:"Le Bosquet des Ancêtres",gate:500, sky:"night", terrain:"bosquet"}
+ {nm:"Le Marché aux Tissus",   gate:40,  sky:"day",   terrain:"marche"},
+ {nm:"La Cité de Banco",       gate:95,  sky:"dusk",  terrain:"cite"},
+ {nm:"Les Rives du Fleuve",    gate:180, sky:"day",   terrain:"fleuve"},
+ {nm:"La Savane Royale",       gate:290, sky:"gold",  terrain:"savane"},
+ {nm:"Le Bosquet des Ancêtres",gate:425, sky:"night", terrain:"bosquet"}
 ];
 /* d = district · x,y = pied du bâtiment dans la scène · s = échelle · z = ordre de profondeur */
 const BUILDINGS=[
@@ -1439,6 +1458,20 @@ let curDist=0;
 function camOf(id){ const b=BUILDINGS.find(x=>x.id===id); return b?[b.x,b.y-((b.h||22)*0.4),2.0]:[200,170,1.6]; }
 let pendingId=null, building=false;
 function sceneBuilt(){ return S.built.filter(x=>x!==pendingId); }
+function nextWork(){
+  for(let i=0;i<DISTRICTS.length;i++)
+    if(distOpen(i)&&BUILDINGS.some(b=>b.d===i&&!S.built.includes(b.id))) return i;
+  return -1;
+}
+function districtDone(d){ return !BUILDINGS.some(b=>b.d===d&&!S.built.includes(b.id)); }
+/* Annonce une seule fois chaque district qui vient de s'ouvrir. */
+function checkUnlocks(){
+  if(!S.seen) S.seen=[0];
+  let opened=-1;
+  DISTRICTS.forEach((D,i)=>{ if(distOpen(i)&&S.seen.indexOf(i)<0){ S.seen.push(i); opened=i; } });
+  if(opened>=0){ save(); return opened; }
+  return -1;
+}
 function distOpen(d){ return S.lvl>=DISTRICTS[d].gate || BUILDINGS.some(b=>b.d===d&&S.built.includes(b.id)); }
 function camTo(px,py,s,ms){
   const cam=$("#cam"); if(!cam) return;
@@ -1483,7 +1516,12 @@ let genDone=false;
 function ensureScenes(){
   if(genDone) return; genDone=true;
   let out=""; for(let d=1;d<DISTRICTS.length;d++) out+=buildDistrict(d);
-  $("#genDist").innerHTML=out;
+  const host=$("#genDist");
+  try{
+    const doc=new DOMParser().parseFromString('<svg xmlns="http://www.w3.org/2000/svg">'+out+'</svg>',"image/svg+xml");
+    if(doc.querySelector("parsererror")) throw new Error("svg");
+    Array.from(doc.documentElement.childNodes).forEach(n=>host.appendChild(document.importNode(n,true)));
+  }catch(e){ host.innerHTML=out; }   // repli si DOMParser manque ou échoue
 }
 function showDist(d){
   if(!distOpen(d)) return;
@@ -1499,10 +1537,23 @@ function renderTabs(){
     const el=document.createElement("button");
     el.className="tab"+(i===curDist?" on":"")+(open?"":" locked");
     el.type="button";
-    el.innerHTML=open ? `${D.nm} <b>${built}/6</b>` : `${D.nm} <b>niv. ${D.gate}</b>`;
+    el.innerHTML=open ? `${D.nm} <b>${built}/6</b>` : `${D.nm} <b>dans ${D.gate-S.lvl} niv.</b>`;
     if(open) el.onclick=()=>{ SND.tap(); showDist(i); };
     t.appendChild(el);
   });
+}
+/* Retour au royaume : ouverture d'un district, sinon on va là où il reste à bâtir. */
+function enterVillage(){
+  const opened=checkUnlocks();
+  if(opened>=0){
+    showDist(opened);
+    caption(DISTRICTS[opened].nm);
+    say("Un nouveau district s'ouvre, princesse : "+DISTRICTS[opened].nm+".");
+    SND.goal();
+    return;
+  }
+  if(districtDone(curDist)){ const w=nextWork(); if(w>=0&&w!==curDist){ showDist(w); return; } }
+  renderVillage();
 }
 function renderVillage(){
   $("#c-cauris").querySelector("span").textContent=S.ca;
@@ -1537,7 +1588,25 @@ function renderVillage(){
              <button class="build" data-id="${b.id}" ${(!isNext||!can||building)?"disabled":""}>Bâtir</button>`);
     wrap.appendChild(el);
   });
-  wrap.querySelectorAll("button.build").forEach(btn=>btn.onclick=()=>build(btn.dataset.id));
+  if(districtDone(curDist)){
+    const nxt=DISTRICTS.findIndex((D,i)=>i>curDist&&BUILDINGS.some(b=>b.d===i&&!S.built.includes(b.id)));
+    const el=document.createElement("div"); el.className="site done";
+    if(nxt<0){
+      el.innerHTML=`<div class="nm"><b>Akoma est complet</b><i>Les trente-six chantiers sont debout.</i></div>`;
+    } else if(distOpen(nxt)){
+      el.innerHTML=`<div class="nm"><b>District achevé</b><i>${DISTRICTS[nxt].nm} vous attend.</i></div>`+
+        `<button class="build" data-go="${nxt}">Y aller</button>`;
+    } else {
+      const reste=DISTRICTS[nxt].gate-S.lvl;
+      el.innerHTML=`<div class="nm"><b>District achevé</b><i>${DISTRICTS[nxt].nm} ouvre au niveau ${DISTRICTS[nxt].gate}`+
+        ` — plus que ${reste} niveau${reste>1?"x":""}.</i></div>`;
+    }
+    wrap.appendChild(el);
+  }
+  wrap.querySelectorAll("button.build").forEach(btn=>{
+    if(btn.dataset.go!==undefined) btn.onclick=()=>{ SND.tap(); showDist(+btn.dataset.go); };
+    else btn.onclick=()=>build(btn.dataset.id);
+  });
 
   const L=levelAt(S.lvl);
   $("#playBtn").innerHTML=`Jouer le niveau ${S.lvl}<small>${S.lives} vie${S.lives>1?"s":""} · ${L.mv} coups${L.royal?" · niveau royal":""}</small>`;
@@ -2098,14 +2167,65 @@ async function finish(win){
 function hearts(){ let s=""; for(let i=0;i<5;i++) s+=`<span class="${i<S.lives?"":"gone"}">${ICON.heart}</span>`; return s; }
 function showCard(html){
   $("#card").innerHTML=html; $("#veil").classList.add("on");
-  $("#card").querySelectorAll("button").forEach(b=>b.onclick=()=>act(b.dataset.act));
+  $("#card").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+    const a=b.dataset.act;
+    if(a==="copy"){
+      const t=$("#codeOut"); t.select(); t.setSelectionRange(0,99999);
+      let ok=false;
+      try{ ok=document.execCommand("copy"); }catch(e){}
+      if(!ok&&navigator.clipboard){ navigator.clipboard.writeText(t.value).catch(()=>{}); ok=true; }
+      b.textContent=ok?"Code copié":"Sélectionnez et copiez à la main";
+      SND.tap(); return;
+    }
+    if(a==="restore"){
+      const v=$("#codeIn").value;
+      if(importCode(v)){ $("#veil").classList.remove("on"); SND.goal();
+        genDone=false; $("#genDist").textContent=""; showDist(0); enterVillage();
+        say("Progression restaurée : niveau "+S.lvl+"."); }
+      else { b.textContent="Code invalide"; SND.bad(); }
+      return;
+    }
+    act(a);
+  });
 }
 function act(a){
   $("#veil").classList.remove("on"); SND.tap();
-  if(a==="village"){ $("#game").classList.add("hide"); $("#village").classList.remove("hide"); onVillage=true; ambient(true); renderVillage(); window.scrollTo(0,0); }
+  if(a==="village"){ $("#game").classList.add("hide"); $("#village").classList.remove("hide"); onVillage=true; ambient(true); enterVillage(); window.scrollTo(0,0); }
   else if(a==="retry"){ startLevel(); }
   else if(a==="ad"){ adUsed=true; S.lives=Math.min(5,S.lives+1); save(); moves=5; busy=false; drawHud(); SND.goal(); $("#tip").textContent="Cinq coups de plus. Faites-les compter."; }
   else if(a==="refill"){ S.lives=5; save(); startLevel(); }
+  else if(a==="close"){ /* rien */ }
+}
+/* ---------- sauvegarde transférable ---------- */
+function exportCode(){
+  const o={v:1,lvl:S.lvl,ca:S.ca,bo:S.bo,built:S.built,lives:S.lives,seen:S.seen||[0]};
+  try{ return btoa(unescape(encodeURIComponent(JSON.stringify(o)))); }catch(e){ return ""; }
+}
+function importCode(txt){
+  try{
+    const o=JSON.parse(decodeURIComponent(escape(atob((txt||"").replace(/\s/g,"")))));
+    if(typeof o.lvl!=="number"||!Array.isArray(o.built)) return false;
+    const ids=BUILDINGS.map(b=>b.id);
+    S.lvl=Math.max(1,Math.round(o.lvl));
+    S.ca=Math.max(0,Math.round(o.ca||0));
+    S.bo=Math.max(0,Math.round(o.bo||0));
+    S.built=o.built.filter(x=>ids.indexOf(x)>=0);
+    S.lives=Math.min(5,Math.max(0,Math.round(o.lives==null?5:o.lives)));
+    S.seen=Array.isArray(o.seen)?o.seen:[0];
+    save(); return true;
+  }catch(e){ return false; }
+}
+function saveCard(){
+  const code=exportCode();
+  showCard(`<h3>Sauvegarde</h3>
+    <p>Niveau ${S.lvl} · ${S.built.length}/${BUILDINGS.length} chantiers</p>
+    <textarea class="code" id="codeOut" readonly>${code}</textarea>
+    <div class="row"><button class="b-gold" data-act="copy">Copier le code</button></div>
+    <p class="fineprint" style="margin-top:14px;text-align:left">Gardez ce code avant de réinstaller
+    l'application. Collez-le ci-dessous pour retrouver votre royaume.</p>
+    <textarea class="code" id="codeIn" placeholder="Collez un code ici"></textarea>
+    <button class="b-ad" data-act="restore">Restaurer</button>
+    <button class="b-ghost" data-act="close">Fermer</button>`);
 }
 function sndIcon(){ $("#sndBtn").innerHTML=SFX.on?SPK:MUTE; $("#sndBtn").classList.toggle("off",!SFX.on); }
 $("#sndBtn").onclick=()=>{
@@ -2114,6 +2234,7 @@ $("#sndBtn").onclick=()=>{
   sndIcon();
   if(SFX.on){ audio(); SND.tap(); if(onVillage) ambient(true); } else ambient(false);
 };
+$("#saveBtn").onclick=()=>{ SND.tap(); saveCard(); };
 sndIcon();
 ["pointerdown","keydown"].forEach(ev=>window.addEventListener(ev,()=>{
   audio(); if(SFX.on&&onVillage) ambient(true);
@@ -2126,7 +2247,7 @@ $("#playBtn").onclick=()=>{
     <p class="fineprint">Publicité simulée.</p>`); return; }
   startLevel();
 };
-$("#quitBtn").onclick=()=>{ SND.tap(); $("#game").classList.add("hide"); $("#village").classList.remove("hide"); onVillage=true; ambient(true); renderVillage(); };
+$("#quitBtn").onclick=()=>{ SND.tap(); $("#game").classList.add("hide"); $("#village").classList.remove("hide"); onVillage=true; ambient(true); enterVillage(); };
 
 showDist(0);
 if(!S.built.length&&S.lvl===1) document.body.classList.add("ruin"),$("#beforeBtn").textContent="Aujourd'hui";

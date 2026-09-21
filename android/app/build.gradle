@@ -7,8 +7,8 @@ android {
         applicationId "com.sankofa.royale"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 3
+        versionName "1.2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -17,6 +17,18 @@ android {
         }
     }
     signingConfigs {
+        debug {
+            // Clé de test fixe, versionnée avec le projet : toutes les compilations
+            // portent la même signature, donc un APK s'installe par-dessus le
+            // précédent sans effacer la progression. À NE JAMAIS utiliser en production.
+            def dks = file("../debug.keystore")
+            if (dks.exists()) {
+                storeFile dks
+                storePassword "android"
+                keyAlias "androiddebugkey"
+                keyPassword "android"
+            }
+        }
         release {
             // Renseignés par les variables d'environnement (voir README et CI).
             def ks = System.getenv("KEYSTORE_PATH")
@@ -41,6 +53,7 @@ android {
         debug {
             applicationIdSuffix ".debug"
             versionNameSuffix "-debug"
+            signingConfig signingConfigs.debug
         }
     }
     bundle { language { enableSplit = false } }
@@ -55,6 +68,7 @@ repositories {
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.core:core:$androidxCoreVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')

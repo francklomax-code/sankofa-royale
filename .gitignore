@@ -7,4 +7,6 @@ android/app/src/main/assets/public/
 android/app/src/main/assets/capacitor.config.json
 *.jks
 *.keystore
+# clé de test, volontairement versionnée pour une signature stable
+!android/debug.keystore
 .DS_Store
