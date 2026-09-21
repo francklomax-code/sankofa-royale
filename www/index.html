@@ -1528,7 +1528,7 @@ function showDist(d){
   ensureScenes(); curDist=d;
   document.querySelectorAll("#scene .dist").forEach(g=>g.classList.toggle("on",+g.dataset.d===d));
   $("#scene").classList.toggle("night",DISTRICTS[d].terrain==="bosquet");
-  camReset(0); renderVillage();
+  syncRuin(); camReset(0); renderVillage();
 }
 function renderTabs(){
   const t=$("#tabs"); t.innerHTML="";
@@ -2177,11 +2177,24 @@ function showCard(html){
       b.textContent=ok?"Code copié":"Sélectionnez et copiez à la main";
       SND.tap(); return;
     }
+    if(a==="reset"){
+      if(!b.dataset.armed){
+        b.dataset.armed="1"; b.textContent="Toucher encore pour tout effacer";
+        b.style.fontWeight="700"; SND.bad();
+        setTimeout(()=>{ if(b.isConnected){ delete b.dataset.armed; b.textContent="Recommencer à zéro"; b.style.fontWeight=""; } },4000);
+        return;
+      }
+      $("#veil").classList.remove("on"); resetGame(); SND.tap();
+      return;
+    }
     if(a==="restore"){
       const v=$("#codeIn").value;
       if(importCode(v)){ $("#veil").classList.remove("on"); SND.goal();
-        genDone=false; $("#genDist").textContent=""; showDist(0); enterVillage();
-        say("Progression restaurée : niveau "+S.lvl+"."); }
+        document.querySelectorAll("#scene .bld").forEach(g=>g.classList.remove("built","raising"));
+        if(S.built.length<BUILDINGS.length) $("#scene").classList.remove("finale");
+        genDone=false; $("#genDist").textContent=""; building=false; pendingId=null;
+        showDist(0); syncRuin(); camReset(0); enterVillage();
+        say("Progression restaurée : niveau "+S.lvl+", "+S.built.length+" chantiers debout."); }
       else { b.textContent="Code invalide"; SND.bad(); }
       return;
     }
@@ -2225,7 +2238,28 @@ function saveCard(){
     l'application. Collez-le ci-dessous pour retrouver votre royaume.</p>
     <textarea class="code" id="codeIn" placeholder="Collez un code ici"></textarea>
     <button class="b-ad" data-act="restore">Restaurer</button>
-    <button class="b-ghost" data-act="close">Fermer</button>`);
+    <button class="b-ghost" data-act="close">Fermer</button>
+    <button class="b-ghost" data-act="reset" style="color:#E2456F;margin-top:14px">Recommencer à zéro</button>`);
+}
+/* Le voile de ruine ne couvre la Cour du Baobab que tant qu'on n'y a rien bâti. */
+function syncRuin(){
+  const vierge=!S.built.some(id=>BUILDINGS.some(b=>b.id===id&&b.d===0));
+  // le voile et les ruines n'appartiennent qu'à la Cour du Baobab
+  document.body.classList.toggle("ruin",vierge&&curDist===0);
+  $("#beforeBtn").textContent=vierge?"Aujourd'hui":"Il y a cent saisons";
+  $("#beforeBtn").style.visibility=curDist===0?"visible":"hidden";
+}
+/* Remise à zéro complète : état, stockage, scène, districts générés. */
+function resetGame(){
+  S={lvl:1,ca:0,bo:0,built:[],lives:5,seen:[0]};
+  try{ localStorage.removeItem("sankofa.v1"); }catch(e){}
+  save();
+  document.querySelectorAll("#scene .bld").forEach(g=>g.classList.remove("built","raising"));
+  $("#scene").classList.remove("finale");
+  $("#genDist").textContent=""; genDone=false;
+  building=false; pendingId=null;
+  showDist(0); syncRuin(); camReset(0);
+  say("Le sable a tout recouvert, princesse. Mais la terre se souvient de nous.");
 }
 function sndIcon(){ $("#sndBtn").innerHTML=SFX.on?SPK:MUTE; $("#sndBtn").classList.toggle("off",!SFX.on); }
 $("#sndBtn").onclick=()=>{
@@ -2250,7 +2284,7 @@ $("#playBtn").onclick=()=>{
 $("#quitBtn").onclick=()=>{ SND.tap(); $("#game").classList.add("hide"); $("#village").classList.remove("hide"); onVillage=true; ambient(true); enterVillage(); };
 
 showDist(0);
-if(!S.built.length&&S.lvl===1) document.body.classList.add("ruin"),$("#beforeBtn").textContent="Aujourd'hui";
+syncRuin();
 })();
 </script>
 <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
